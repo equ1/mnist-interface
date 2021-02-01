@@ -1,12 +1,10 @@
 import os
 import torch
 import torch.nn.functional as F
-from torchvision import transforms
 from model import Net
 from model import transform_input
 import gradio as gr
 from PIL import Image
-import matplotlib.pyplot as plt
 
 
 def inference(img):
@@ -32,6 +30,7 @@ model.load_state_dict(torch.load(
 model.eval()
 
 labels = range(10)  # 1-9 labels
-inputs = gr.inputs.Image(shape=(28, 28), image_mode='L', source="canvas", invert_colors=True)
+inputs = gr.inputs.Image(shape=(28, 28), image_mode='L',
+                         source="canvas", invert_colors=True)
 outputs = gr.outputs.Label(num_top_classes=5)
 gr.Interface(fn=inference, inputs=inputs, outputs=outputs, live=True).launch()
