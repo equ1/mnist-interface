@@ -157,7 +157,7 @@ def test(model, test_set, test_set_loader, opt, criterion, epoch, model_name, vi
 
 def main():
     # Parameters
-    EPOCHS = 5
+    EPOCHS = 3
     BATCH_SIZE_TRAIN = 32
     BATCH_SIZE_TEST = 64
     LRN_RATE = 0.003

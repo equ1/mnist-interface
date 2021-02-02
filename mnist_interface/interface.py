@@ -30,5 +30,5 @@ model.eval()
 # Creates gradio interface
 labels = range(10)  # 1-9 labels
 outputs = gr.outputs.Label(num_top_classes=5)
-gr.Interface(fn=inference, inputs='sketchpad', outputs=outputs, live=True, title="MNIST interface",
+gr.Interface(fn=inference, inputs='sketchpad', outputs=outputs, title="MNIST interface",
              description="Draw a number from 0-9 in the box and click submit to see the model's predictions.").launch()
