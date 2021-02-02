@@ -1,7 +1,6 @@
 import os
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms, utils
@@ -37,21 +36,17 @@ class Net(nn.Module):
             nn.BatchNorm1d(128),
             nn.ReLU()
         )
-        self.fc2 = nn.Linear(128, 10)
+        self.layer4 = nn.Sequential(
+            nn.Linear(128, 10),
+            nn.LogSoftmax(dim=1)
+        )
 
     def forward(self, x):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
-        x = self.fc2(x)
-        return F.log_softmax(x, dim=1)
-
-
-def get_num_correct(preds, labels):
-    '''
-    returns number of predictions that match their respective labels
-    '''
-    return preds.argmax(dim=1).eq(labels).sum().item()
+        x = self.layer4(x)
+        return x
 
 
 def transform_input(img):
@@ -59,64 +54,22 @@ def transform_input(img):
     transforms image
     '''
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
+        [transforms.ToTensor(), transforms.Resize((28, 28)), transforms.Normalize((0.1307,), (0.3081,))])
     return transform(img)
 
 
-def train(model, train_set, train_set_loader, opt, epoch, writer):
-    # Training
-    model.train()
+def visualize_metric(model_name, tags, values, epoch):
+    # Declares Tensorboard writer
+    writer = SummaryWriter(f"runs/{model_name}")
 
-    total_correct = 0
+    # Adds scalars to Tensorboard viz
+    for tag, value in zip(tags, values):
+        writer.add_scalar(tag, value, epoch)
 
-    for images, labels in tqdm(train_set_loader):
-        opt.zero_grad()
-        preds = model(images)
-        loss = F.nll_loss(preds, labels)
-        loss.backward()
-        opt.step()
-
-        total_correct += get_num_correct(preds, labels)
-
-    accuracy = total_correct/len(train_set)
-
-    print(f"Train set:- Loss: {loss.item()}, Accuracy: {accuracy}.")
-
-    # Training viz
-    writer.add_scalar("Train/Loss", loss.item(), epoch)
-    writer.add_scalar("Train/Accuracy", accuracy, epoch)
+    writer.close()
 
 
-def test(model, test_set, test_set_loader, opt, epoch, writer):
-    # Testing
-    model.eval()
-
-    test_loss = 0
-    total_correct = 0
-
-    with torch.no_grad():
-        for images, labels in tqdm(test_set_loader):
-            outputs = model(images)
-            test_loss += F.nll_loss(outputs, labels, reduction='sum').item()
-            total_correct += get_num_correct(outputs, labels)
-        test_loss /= len(test_set)
-
-    accuracy = total_correct/len(test_set)
-
-    print(f"Test set:- Avg. Loss: {test_loss}, Accuracy:{accuracy}.")
-
-    # Testing viz
-    writer.add_scalar("Test/Loss", test_loss, epoch)
-    writer.add_scalar("Test/Accuracy", accuracy, epoch)
-
-
-def main():
-    # Parameters
-    EPOCHS = 10
-    BATCH_SIZE_TRAIN = 32
-    BATCH_SIZE_TEST = 1000
-    LRN_RATE = 0.001
-
+def data_generator(transform_input, BATCH_SIZE_TRAIN, BATCH_SIZE_TEST):
     # Creates dataset
     train_set = datasets.MNIST('/data/', train=True, download=False,
                                transform=transform_input)
@@ -127,30 +80,103 @@ def main():
     test_set_loader = torch.utils.data.DataLoader(
         test_set, batch_size=BATCH_SIZE_TEST, shuffle=True)
 
-    # Declares Tensorboard writer
-    model_name = f"mnist-cnn-{time.time()}"
-    writer = SummaryWriter(f"runs/{model_name}")
-    print(f"\nTensorboard is recording into folder: runs/{model_name}.")
+    return (train_set, test_set, train_set_loader, test_set_loader)
 
-    # Visualizes first batch of train set images
-    dataiter = iter(train_set_loader)
-    images = dataiter.next()[0]
-    grid = utils.make_grid(images)
-    writer.add_image('Dataset/Images', grid, 0)
-    writer.close()
 
-    # Creates model and optimizer
-    model = Net()
-    opt = optim.Adam(model.parameters(), lr=LRN_RATE)
-    for epoch in range(EPOCHS):
-        print(f"\nEpoch {epoch+1}/{EPOCHS}.")
-        train(model, train_set, train_set_loader, opt, epoch, writer)
-        test(model, test_set, test_set_loader, opt, epoch, writer)
-        writer.close()
+def train(model, train_set, train_set_loader, opt, criterion, epoch, model_name, save_model, visualize):
+    # Training
+    model.train()
+
+    total_train_loss = 0
+    total_correct = 0
+
+    for i, (images, labels) in enumerate(tqdm(train_set_loader)):
+        opt.zero_grad()
+
+        outputs = model(images)
+
+        loss = criterion(outputs, labels)
+        total_train_loss += loss.item()
+
+        loss.backward()
+        opt.step()
+
+        # Calculates train accuracy
+        outputs_probs = nn.functional.softmax(
+            outputs, dim=1)  # gets probabilities
+        for idx, preds in enumerate(outputs_probs):
+            # if label with max probability matches true label
+            if labels[idx] == torch.argmax(preds.data):
+                total_correct += 1
+
+    train_loss = total_train_loss/(i+1)
+    train_accuracy = total_correct/len(train_set)
+
+    print(f"Train set:- Loss: {train_loss}, Accuracy: {train_accuracy}.")
+
+    # Training viz
+    if visualize:
+        visualize_metric(model_name, ["Train/Loss", "Train/Accuracy"],
+                         [train_loss, train_accuracy], epoch)
 
     # Saves model state
-    torch.save(model.state_dict(), os.getcwd() +
-               f"/mnist_interface/saved_models/{model_name}.pt")
+    if save_model:
+        torch.save(model.state_dict(), os.getcwd() +
+                   f"/mnist_interface/saved_models/{model_name}.pt")
+
+
+def test(model, test_set, test_set_loader, opt, criterion, epoch, model_name, visualize):
+    # Testing
+    model.eval()
+
+    total_test_loss = 0
+    total_correct = 0
+
+    with torch.no_grad():
+        for i, (images, labels) in enumerate(tqdm(test_set_loader)):
+            outputs = model(images)
+
+            loss = criterion(outputs, labels)
+            total_test_loss += loss.item()
+
+            outputs_probs = nn.functional.softmax(outputs, dim=1)
+            for idx, preds in enumerate(outputs_probs):
+                if labels[idx] == torch.argmax(preds.data):
+                    total_correct += 1
+
+    test_loss = total_test_loss/(i+1)
+    test_accuracy = total_correct/len(test_set)
+
+    print(f"Test set:- Loss: {test_loss}, Accuracy:{test_accuracy}.")
+
+    # Testing viz
+    if visualize:
+        visualize_metric(model_name, ["Test/Loss", "Test/Accuracy"],
+                         [test_loss, test_accuracy], epoch)
+
+
+def main():
+    # Parameters
+    EPOCHS = 5
+    BATCH_SIZE_TRAIN = 32
+    BATCH_SIZE_TEST = 64
+    LRN_RATE = 0.003
+    model_name = f"mnist-cnn-{time.time()}"
+
+    # Creates train/test split
+    train_set, test_set, train_set_loader, test_set_loader = data_generator(
+        transform_input, BATCH_SIZE_TRAIN, BATCH_SIZE_TEST)
+
+    # Creates model
+    model = Net()
+    optimizer = optim.Adam(model.parameters(), lr=LRN_RATE)
+    criterion = nn.NLLLoss()
+    for epoch in range(EPOCHS):
+        print(f"\nEpoch {epoch+1}/{EPOCHS}.")
+        train(model, train_set, train_set_loader,
+              optimizer, criterion, epoch, model_name, save_model=True, visualize=True)
+        test(model, test_set, test_set_loader,
+             optimizer, criterion, epoch, model_name, visualize=True)
 
 
 if __name__ == "__main__":

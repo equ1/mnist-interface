@@ -8,9 +8,7 @@ from PIL import Image
 
 
 def inference(img):
-    # creates PIL image from input ndarray
-    img = Image.fromarray(img.astype('uint8'))
-    # transforms image and adds batch dimension
+    # transforms ndarray and adds batch dimension
     img = transform_input(img).unsqueeze(0)
 
     with torch.no_grad():
@@ -29,8 +27,8 @@ model.load_state_dict(torch.load(
     os.getcwd()+f"/mnist_interface/saved_models/mnist-cnn-{latest_timestamp}.pt"))
 model.eval()
 
+# Creates gradio interface
 labels = range(10)  # 1-9 labels
-inputs = gr.inputs.Image(shape=(28, 28), image_mode='L',
-                         source="canvas", invert_colors=True)
 outputs = gr.outputs.Label(num_top_classes=5)
-gr.Interface(fn=inference, inputs=inputs, outputs=outputs, live=True).launch()
+gr.Interface(fn=inference, inputs='sketchpad', outputs=outputs, live=True, title="MNIST interface",
+             description="Draw a number from 0-9 in the box and click submit to see the model's predictions.").launch()
