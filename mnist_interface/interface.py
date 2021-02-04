@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from model import Net
 from model import transform_input
 import gradio as gr
-from PIL import Image
 
 
 def inference(img):
